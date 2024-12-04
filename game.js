@@ -89,8 +89,9 @@ $(document).ready(function () {
     emoji.css("top", y);
     emoji.data("x", x);
     emoji.data("y", y);
-    emoji.data("dx", (Math.random() - 0.5) * 2 + 0.2);
-    emoji.data("dy", (Math.random() - 0.5) * 2 + 0.2);
+    const speedScale = GAME_STATE.currentSpeedScale;
+    emoji.data("dx", ((Math.random() - 0.5) * 2 + 0.2) * speedScale);
+    emoji.data("dy", ((Math.random() - 0.5) * 2 + 0.2) * speedScale);
 
     // 修改这里的字体大小计算
     const fontSize = Math.max(12, $("#game-area").width() / 40);
@@ -204,53 +205,51 @@ $(document).ready(function () {
     }
   }
 
-  // 修改 updateAllEmojis 函数
-  function updateAllEmojis() {
+  // 添加速度缩放相关的常量
+  const SPEED_SCALE = {
+    BASE_WIDTH: 355,    // 基准宽度
+    BASE_HEIGHT: 300,   // 基准高度
+    BASE_FONT: 12,      // 基准字体大小
+    MIN_SCALE: 1,       // 最小缩放倍数
+    MAX_SCALE: 2.5      // 最大缩放倍数
+  };
+
+  // 添加获取速度缩放比例的函数
+  function getSpeedScale() {
     const gameArea = $("#game-area");
     const width = gameArea.width();
     const height = gameArea.height();
-    const spatialGrid = new SpatialGrid(width, height, GRID_SIZE);
+    const fontSize = Math.max(12, width / 40); // 当前字体大小
 
-    // 首先更新空间网格
-    $(".emoji").each(function () {
-      const emoji = $(this);
-      spatialGrid.insert(emoji, emoji.data("x"), emoji.data("y"));
-    });
+    // 计算尺寸比例
+    const sizeRatio = Math.sqrt(
+      (width * height) / (SPEED_SCALE.BASE_WIDTH * SPEED_SCALE.BASE_HEIGHT)
+    );
 
-    // 批量更新位置
-    const updates = [];
+    // 计算字体比例
+    const fontRatio = fontSize / SPEED_SCALE.BASE_FONT;
 
-    $(".emoji").each(function () {
-      const emoji = $(this);
-      const update = calculateUpdate(emoji, spatialGrid);
-      if (update) {
-        updates.push(update);
-      }
-    });
+    // 综合比例
+    const scale = Math.min(
+      SPEED_SCALE.MAX_SCALE,
+      Math.max(
+        SPEED_SCALE.MIN_SCALE,
+        (sizeRatio + fontRatio) / 2
+      )
+    );
 
-    // 批量应用更新
-    requestAnimationFrame(() => {
-      updates.forEach(update => {
-        update.emoji.css({
-          left: update.x,
-          top: update.y
-        });
-        update.emoji.data({
-          x: update.x,
-          y: update.y,
-          dx: update.dx,
-          dy: update.dy
-        });
-      });
-    });
+    return scale;
   }
 
-  // 新增计算更新函数
+  // 修改 calculateUpdate 函数
   function calculateUpdate(emoji, spatialGrid) {
     let x = emoji.data("x");
     let y = emoji.data("y");
     let dx = emoji.data("dx");
     let dy = emoji.data("dy");
+
+    // 使用保存的速度倍率
+    const speedScale = GAME_STATE.currentSpeedScale;
 
     // 添加随机速度变化
     dx *= (1 + (Math.random() - 0.5) * RANDOM.SPEED_VARIATION);
@@ -259,16 +258,19 @@ $(document).ready(function () {
     const nearbyEmojis = spatialGrid.getNearbyEmojis(x, y);
     const behavior = calculateBehavior(emoji, $(nearbyEmojis));
 
-    dx += behavior.forceX;
-    dy += behavior.forceY;
+    // 应用缩放到行为力
+    dx += behavior.forceX * speedScale;
+    dy += behavior.forceY * speedScale;
 
+    // 应用缩放到最大速度限制
+    const scaledMaxSpeed = MAX_SPEED * speedScale;
     const speed = Math.sqrt(dx * dx + dy * dy);
-    if (speed > MAX_SPEED) {
-      dx = (dx / speed) * MAX_SPEED;
-      dy = (dy / speed) * MAX_SPEED;
+    if (speed > scaledMaxSpeed) {
+      dx = (dx / speed) * scaledMaxSpeed;
+      dy = (dy / speed) * scaledMaxSpeed;
     }
 
-    const result = handleCollisions(emoji, x, y, dx, dy, nearbyEmojis);
+    const result = handleCollisions(emoji, x, y, dx, dy, nearbyEmojis, speedScale);
 
     return {
       emoji: emoji,
@@ -280,7 +282,7 @@ $(document).ready(function () {
   }
 
   // 新增碰撞处理函数
-  function handleCollisions(emoji, x, y, dx, dy, nearbyEmojis) {
+  function handleCollisions(emoji, x, y, dx, dy, nearbyEmojis, speedScale) {
     const width = emoji.width();
     const height = emoji.height();
     const gameAreaWidth = $("#game-area").width();
@@ -324,8 +326,8 @@ $(document).ready(function () {
           } else if (beats[type] !== otherType && beats[otherType] !== type) {
             // 简化的弹开处理
             const angle = Math.atan2(y - oy, x - ox);
-            dx = Math.cos(angle) * MAX_SPEED;
-            dy = Math.sin(angle) * MAX_SPEED;
+            dx = Math.cos(angle) * MAX_SPEED * speedScale;
+            dy = Math.sin(angle) * MAX_SPEED * speedScale;
           }
         }
       }
@@ -342,7 +344,9 @@ $(document).ready(function () {
   const GAME_STATE = {
     running: false,
     startTime: null,
-    endTime: null
+    endTime: null,
+    currentSpeedScale: 1,
+    intervalId: null  // 添加 intervalId 来跟踪 setInterval
   };
 
   // 添加时间格式化函数
@@ -379,6 +383,13 @@ $(document).ready(function () {
     if (totalCount > 0 && totalCount === counters[winner]) {
       GAME_STATE.running = false;
       GAME_STATE.endTime = Date.now();
+
+      // 清除定时器
+      if (GAME_STATE.intervalId !== null) {
+        clearInterval(GAME_STATE.intervalId);
+        GAME_STATE.intervalId = null;
+      }
+
       const duration = GAME_STATE.endTime - GAME_STATE.startTime;
 
       // 创建结束游戏蒙版
@@ -412,13 +423,20 @@ $(document).ready(function () {
     }
   }
 
-  // 修改 startAnimation 函数，添加计时器更新
+  // 修改 startAnimation 函数
   function startAnimation() {
+    // 清除可能存在的旧定时器
+    if (GAME_STATE.intervalId !== null) {
+      clearInterval(GAME_STATE.intervalId);
+      GAME_STATE.intervalId = null;
+    }
+
     GAME_STATE.running = true;
     GAME_STATE.startTime = Date.now();
     GAME_STATE.endTime = null;
 
-    setInterval(() => {
+    // 保存新的定时器 ID
+    GAME_STATE.intervalId = setInterval(() => {
       if (GAME_STATE.running) {
         updateAllEmojis();
         updateTimer();
@@ -429,10 +447,20 @@ $(document).ready(function () {
 
   // 修改 start 按钮点击事件
   $("#start").click(function () {
+    // 确保清除旧的定时器
+    if (GAME_STATE.intervalId !== null) {
+      clearInterval(GAME_STATE.intervalId);
+      GAME_STATE.intervalId = null;
+    }
+
     $("#game-area").empty();
     GAME_STATE.running = false;
     GAME_STATE.startTime = null;
     GAME_STATE.endTime = null;
+
+    // 在游戏开始时计算并保存速度倍率
+    GAME_STATE.currentSpeedScale = getSpeedScale();
+
     counters = {
       rock: 0,
       scissors: 0,
@@ -440,18 +468,54 @@ $(document).ready(function () {
     };
     updateCounters();
     $("#timer").text("时间: 00:00:000");
-    var rockCount = $("#rock").val();
-    var scissorsCount = $("#scissors").val();
-    var paperCount = $("#paper").val();
-    for (var i = 0; i < rockCount; i++) {
-      createEmoji("rock");
-    }
-    for (var i = 0; i < scissorsCount; i++) {
-      createEmoji("scissors");
-    }
-    for (var i = 0; i < paperCount; i++) {
-      createEmoji("paper");
-    }
+
+    const rockCount = parseInt($("#rock").val()) || 0;
+    const scissorsCount = parseInt($("#scissors").val()) || 0;
+    const paperCount = parseInt($("#paper").val()) || 0;
+
+    for (let i = 0; i < rockCount; i++) createEmoji("rock");
+    for (let i = 0; i < scissorsCount; i++) createEmoji("scissors");
+    for (let i = 0; i < paperCount; i++) createEmoji("paper");
+
     startAnimation();
   });
+
+  // 添加 updateAllEmojis 函数
+  function updateAllEmojis() {
+    const gameArea = $("#game-area");
+    const width = gameArea.width();
+    const height = gameArea.height();
+    const spatialGrid = new SpatialGrid(width, height, GRID_SIZE);
+    const emojis = $(".emoji");
+    const updates = [];
+
+    // 更新网格
+    emojis.each(function () {
+      const emoji = $(this);
+      spatialGrid.insert(emoji, emoji.data("x"), emoji.data("y"));
+    });
+
+    // 计算更新
+    emojis.each(function () {
+      const emoji = $(this);
+      const update = calculateUpdate(emoji, spatialGrid);
+      if (update) {
+        updates.push(update);
+      }
+    });
+
+    // 批量应用更新
+    updates.forEach(update => {
+      update.emoji.css({
+        left: update.x,
+        top: update.y
+      });
+      update.emoji.data({
+        x: update.x,
+        y: update.y,
+        dx: update.dx,
+        dy: update.dy
+      });
+    });
+  }
 });
