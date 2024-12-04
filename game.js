@@ -102,13 +102,27 @@ $(document).ready(function () {
     return emoji;
   }
 
-  // 添加一个函数用于计算追逐和逃避行为
+  // 添加随机性相关的常量
+  const RANDOM = {
+    DIRECTION_CHANGE: 0.02,  // 随机改变方向的概率
+    FORCE_VARIATION: 0.03,   // 力的随机变化幅度
+    SPEED_VARIATION: 0.1,    // 速度的随机变化幅度
+    MAX_WANDER: 0.3         // 最大随机游走力度
+  };
+
+  // 修改 calculateBehavior 函数，添加随机游走行为
   function calculateBehavior(emoji, allEmojis) {
     let type = emoji.attr("class").split(" ")[1];
     let x = emoji.data("x");
     let y = emoji.data("y");
     let totalForceX = 0;
     let totalForceY = 0;
+
+    // 添加随机游走行为
+    if (Math.random() < RANDOM.DIRECTION_CHANGE) {
+      totalForceX += (Math.random() - 0.5) * RANDOM.MAX_WANDER;
+      totalForceY += (Math.random() - 0.5) * RANDOM.MAX_WANDER;
+    }
 
     allEmojis.each(function () {
       let other = $(this);
@@ -123,15 +137,17 @@ $(document).ready(function () {
           let normalizedDirX = distanceInfo.directionX / distanceInfo.distance;
           let normalizedDirY = distanceInfo.directionY / distanceInfo.distance;
 
-          // 如果是可以击败的对象，追逐它
+          // 添加随机变化到追逐和逃避力度
+          const chaseVariation = 1 + (Math.random() - 0.5) * RANDOM.FORCE_VARIATION;
+          const fleeVariation = 1 + (Math.random() - 0.5) * RANDOM.FORCE_VARIATION;
+
           if (beats[type] === otherType) {
-            totalForceX += normalizedDirX * CHASE_FORCE;
-            totalForceY += normalizedDirY * CHASE_FORCE;
+            totalForceX += normalizedDirX * CHASE_FORCE * chaseVariation;
+            totalForceY += normalizedDirY * CHASE_FORCE * chaseVariation;
           }
-          // 如果是会被击败的对象，逃离它
           if (beatenBy[type] === otherType) {
-            totalForceX -= normalizedDirX * FLEE_FORCE;
-            totalForceY -= normalizedDirY * FLEE_FORCE;
+            totalForceX -= normalizedDirX * FLEE_FORCE * fleeVariation;
+            totalForceY -= normalizedDirY * FLEE_FORCE * fleeVariation;
           }
         }
       }
@@ -194,32 +210,37 @@ $(document).ready(function () {
     const width = gameArea.width();
     const height = gameArea.height();
     const spatialGrid = new SpatialGrid(width, height, GRID_SIZE);
-    const emojis = $(".emoji").toArray();
-    const updates = [];
 
-    // 更新网格
-    emojis.forEach(el => {
-      const emoji = $(el);
+    // 首先更新空间网格
+    $(".emoji").each(function () {
+      const emoji = $(this);
       spatialGrid.insert(emoji, emoji.data("x"), emoji.data("y"));
     });
 
-    // 计算更新
-    emojis.forEach(el => {
-      const emoji = $(el);
+    // 批量更新位置
+    const updates = [];
+
+    $(".emoji").each(function () {
+      const emoji = $(this);
       const update = calculateUpdate(emoji, spatialGrid);
-      if (update) updates.push(update);
+      if (update) {
+        updates.push(update);
+      }
     });
 
     // 批量应用更新
-    updates.forEach(update => {
-      update.emoji.css({
-        left: update.x,
-        top: update.y
-      }).data({
-        x: update.x,
-        y: update.y,
-        dx: update.dx,
-        dy: update.dy
+    requestAnimationFrame(() => {
+      updates.forEach(update => {
+        update.emoji.css({
+          left: update.x,
+          top: update.y
+        });
+        update.emoji.data({
+          x: update.x,
+          y: update.y,
+          dx: update.dx,
+          dy: update.dy
+        });
       });
     });
   }
@@ -231,22 +252,22 @@ $(document).ready(function () {
     let dx = emoji.data("dx");
     let dy = emoji.data("dy");
 
-    // 获取附近的emoji进行碰撞检测
-    const nearbyEmojis = spatialGrid.getNearbyEmojis(x, y);
+    // 添加随机速度变化
+    dx *= (1 + (Math.random() - 0.5) * RANDOM.SPEED_VARIATION);
+    dy *= (1 + (Math.random() - 0.5) * RANDOM.SPEED_VARIATION);
 
-    // 计算行为
+    const nearbyEmojis = spatialGrid.getNearbyEmojis(x, y);
     const behavior = calculateBehavior(emoji, $(nearbyEmojis));
+
     dx += behavior.forceX;
     dy += behavior.forceY;
 
-    // 速度限制
     const speed = Math.sqrt(dx * dx + dy * dy);
     if (speed > MAX_SPEED) {
       dx = (dx / speed) * MAX_SPEED;
       dy = (dy / speed) * MAX_SPEED;
     }
 
-    // 边界检查和碰撞处理
     const result = handleCollisions(emoji, x, y, dx, dy, nearbyEmojis);
 
     return {
@@ -265,65 +286,54 @@ $(document).ready(function () {
     const gameAreaWidth = $("#game-area").width();
     const gameAreaHeight = $("#game-area").height();
     const padding = 2;
-    let collisionOccurred = false;
 
     // 边界检查
     if (x < padding) {
       x = padding;
       dx = Math.abs(dx);
-      collisionOccurred = true;
     }
     if (x + width > gameAreaWidth - padding) {
       x = gameAreaWidth - width - padding;
       dx = -Math.abs(dx);
-      collisionOccurred = true;
     }
     if (y < padding) {
       y = padding;
       dy = Math.abs(dy);
-      collisionOccurred = true;
     }
     if (y + height > gameAreaHeight - padding) {
       y = gameAreaHeight - height - padding;
       dy = -Math.abs(dy);
-      collisionOccurred = true;
     }
 
-    if (!collisionOccurred) {
-      const type = emoji.attr("class").split(" ")[1];
+    // 碰撞检测和处理
+    const type = emoji.attr("class").split(" ")[1];
 
-      for (let other of nearbyEmojis) {
-        if (other[0] === emoji[0]) continue;
-
-        const ox = $(other).data("x");
-        const oy = $(other).data("y");
-        const distance = Math.sqrt(Math.pow(x - ox, 2) + Math.pow(y - oy, 2));
-
-        if (distance < width * PERFORMANCE.COLLISION_THRESHOLD) {
-          const otherType = $(other).attr("class").split(" ")[1];
+    nearbyEmojis.forEach(other => {
+      if (other[0] !== emoji[0]) {
+        const ox = other.data("x");
+        const oy = other.data("y");
+        if (Math.abs(x - ox) < width && Math.abs(y - oy) < height) {
+          const otherType = other.attr("class").split(" ")[1];
 
           if (beats[type] === otherType) {
+            // 直接处理转换，不使用 setTimeout
             counters[otherType]--;
             counters[type]++;
-            $(other).removeClass(otherType).addClass(type).text(emojis[type]);
+            other.removeClass(otherType).addClass(type).text(emojis[type]);
             updateCounters();
-            break; // 每帧只处理一次转换
           } else if (beats[type] !== otherType && beats[otherType] !== type) {
+            // 简化的弹开处理
             const angle = Math.atan2(y - oy, x - ox);
-            dx = Math.cos(angle) * MAX_SPEED * 0.8; // 降低反弹速度
-            dy = Math.sin(angle) * MAX_SPEED * 0.8;
-            collisionOccurred = true;
-            break;
+            dx = Math.cos(angle) * MAX_SPEED;
+            dy = Math.sin(angle) * MAX_SPEED;
           }
         }
       }
-    }
+    });
 
-    // 应用移动
-    if (!collisionOccurred) {
-      x += dx;
-      y += dy;
-    }
+    // 更新位置
+    x += dx;
+    y += dy;
 
     return { x, y, dx, dy };
   }
@@ -332,15 +342,7 @@ $(document).ready(function () {
   const GAME_STATE = {
     running: false,
     startTime: null,
-    endTime: null,
-    animationFrame: null,  // 添加动画帧引用
-    lastUpdate: null       // 添加上次更新时间
-  };
-
-  const PERFORMANCE = {
-    UPDATE_INTERVAL: 16,    // 约60fps
-    MIN_FRAME_TIME: 14,    // 最小帧时间
-    COLLISION_THRESHOLD: 1.5 // 碰撞检测阈值
+    endTime: null
   };
 
   // 添加时间格式化函数
@@ -352,7 +354,7 @@ $(document).ready(function () {
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${milliseconds.toString().padStart(3, '0')}`;
   }
 
-  // 修改时间更新函数
+  // 添加时间更新函数
   function updateTimer() {
     if (GAME_STATE.running && GAME_STATE.startTime) {
       const currentTime = Date.now();
@@ -410,48 +412,27 @@ $(document).ready(function () {
     }
   }
 
-  // 优化更新函数
-  function gameLoop(timestamp) {
-    if (!GAME_STATE.running) return;
-
-    // 计算帧时间
-    if (!GAME_STATE.lastUpdate) GAME_STATE.lastUpdate = timestamp;
-    const deltaTime = timestamp - GAME_STATE.lastUpdate;
-
-    // 限制更新频率
-    if (deltaTime >= PERFORMANCE.MIN_FRAME_TIME) {
-      GAME_STATE.lastUpdate = timestamp;
-      updateAllEmojis();
-      updateTimer();
-      checkGameEnd();
-    }
-
-    // 请求下一帧
-    GAME_STATE.animationFrame = requestAnimationFrame(gameLoop);
-  }
-
-  // 优化 startAnimation 函数
+  // 修改 startAnimation 函数，添加计时器更新
   function startAnimation() {
-    if (GAME_STATE.animationFrame) {
-      cancelAnimationFrame(GAME_STATE.animationFrame);
-    }
     GAME_STATE.running = true;
     GAME_STATE.startTime = Date.now();
     GAME_STATE.endTime = null;
-    GAME_STATE.lastUpdate = null;
-    GAME_STATE.animationFrame = requestAnimationFrame(gameLoop);
+
+    setInterval(() => {
+      if (GAME_STATE.running) {
+        updateAllEmojis();
+        updateTimer();
+        checkGameEnd();
+      }
+    }, 16);
   }
 
   // 修改 start 按钮点击事件
   $("#start").click(function () {
-    if (GAME_STATE.animationFrame) {
-      cancelAnimationFrame(GAME_STATE.animationFrame);
-    }
     $("#game-area").empty();
     GAME_STATE.running = false;
     GAME_STATE.startTime = null;
     GAME_STATE.endTime = null;
-    GAME_STATE.lastUpdate = null;
     counters = {
       rock: 0,
       scissors: 0,
@@ -459,15 +440,18 @@ $(document).ready(function () {
     };
     updateCounters();
     $("#timer").text("时间: 00:00:000");
-
-    const rockCount = parseInt($("#rock").val()) || 0;
-    const scissorsCount = parseInt($("#scissors").val()) || 0;
-    const paperCount = parseInt($("#paper").val()) || 0;
-
-    for (let i = 0; i < rockCount; i++) createEmoji("rock");
-    for (let i = 0; i < scissorsCount; i++) createEmoji("scissors");
-    for (let i = 0; i < paperCount; i++) createEmoji("paper");
-
+    var rockCount = $("#rock").val();
+    var scissorsCount = $("#scissors").val();
+    var paperCount = $("#paper").val();
+    for (var i = 0; i < rockCount; i++) {
+      createEmoji("rock");
+    }
+    for (var i = 0; i < scissorsCount; i++) {
+      createEmoji("scissors");
+    }
+    for (var i = 0; i < paperCount; i++) {
+      createEmoji("paper");
+    }
     startAnimation();
   });
 });
