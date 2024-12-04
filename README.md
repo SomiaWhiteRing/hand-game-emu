@@ -1,4 +1,4 @@
-# 石头剪刀布大战 (Rock Paper Scissors Battle)
+# 石头剪刀布模拟战 (Rock Paper Scissors Battle)
 
 一个有趣的石头剪刀布自动对战模拟器。在这个模拟器中，石头、剪刀、布会根据相互克制关系自动追逐或逃避对方。
 

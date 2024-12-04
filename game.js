@@ -324,8 +324,28 @@ $(document).ready(function () {
 
   // 在开头的常量定义部分添加
   const GAME_STATE = {
-    running: false
+    running: false,
+    startTime: null,
+    endTime: null
   };
+
+  // 添加时间格式化函数
+  function formatTime(ms) {
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.floor((ms % 60000) / 1000);
+    const milliseconds = ms % 1000;
+
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${milliseconds.toString().padStart(3, '0')}`;
+  }
+
+  // 修改时间更新函数
+  function updateTimer() {
+    if (GAME_STATE.running && GAME_STATE.startTime) {
+      const currentTime = Date.now();
+      const elapsedTime = currentTime - GAME_STATE.startTime;
+      $("#timer").text(`时间: ${formatTime(elapsedTime)}`);
+    }
+  }
 
   // 添加游戏结束检查函数
   function checkGameEnd() {
@@ -342,6 +362,8 @@ $(document).ready(function () {
     // 如果只剩一种类型的emoji
     if (totalCount > 0 && totalCount === counters[winner]) {
       GAME_STATE.running = false;
+      GAME_STATE.endTime = Date.now();
+      const duration = GAME_STATE.endTime - GAME_STATE.startTime;
 
       // 创建结束游戏蒙版
       const overlay = $("<div></div>")
@@ -354,12 +376,21 @@ $(document).ready(function () {
           backgroundColor: "rgba(0, 0, 0, 0.7)",
           color: "white",
           display: "flex",
+          flexDirection: "column",
           justifyContent: "center",
           alignItems: "center",
           fontSize: "2em",
           zIndex: 1000
-        })
-        .text(`${emojis[winner]}获胜！`);
+        });
+
+      // 添加胜利信息和用时信息
+      overlay.append(
+        $("<div></div>").text(`${emojis[winner]}获胜！`),
+        $("<div></div>").css({
+          fontSize: "0.6em",
+          marginTop: "10px"
+        }).text(`用时：${formatTime(duration)}`)
+      );
 
       $("#game-area").append(overlay);
     }
@@ -368,12 +399,16 @@ $(document).ready(function () {
   // 修改 startAnimation 函数
   function startAnimation() {
     GAME_STATE.running = true;
+    GAME_STATE.startTime = Date.now();
+    GAME_STATE.endTime = null;
+
     const animationInterval = setInterval(() => {
       if (!GAME_STATE.running) {
         clearInterval(animationInterval);
         return;
       }
       updateAllEmojis();
+      updateTimer();
       checkGameEnd();
     }, UPDATE_INTERVAL);
   }
@@ -382,12 +417,15 @@ $(document).ready(function () {
   $("#start").click(function () {
     $("#game-area").empty();
     GAME_STATE.running = false;
+    GAME_STATE.startTime = null;
+    GAME_STATE.endTime = null;
     counters = {
       rock: 0,
       scissors: 0,
       paper: 0,
     };
     updateCounters();
+    $("#timer").text("时间: 00:00:000");
     var rockCount = $("#rock").val();
     var scissorsCount = $("#scissors").val();
     var paperCount = $("#paper").val();
