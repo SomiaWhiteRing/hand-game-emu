@@ -194,37 +194,32 @@ $(document).ready(function () {
     const width = gameArea.width();
     const height = gameArea.height();
     const spatialGrid = new SpatialGrid(width, height, GRID_SIZE);
+    const emojis = $(".emoji").toArray();
+    const updates = [];
 
-    // 首先更新空间网格
-    $(".emoji").each(function () {
-      const emoji = $(this);
+    // 更新网格
+    emojis.forEach(el => {
+      const emoji = $(el);
       spatialGrid.insert(emoji, emoji.data("x"), emoji.data("y"));
     });
 
-    // 批量更新位置
-    const updates = [];
-
-    $(".emoji").each(function () {
-      const emoji = $(this);
+    // 计算更新
+    emojis.forEach(el => {
+      const emoji = $(el);
       const update = calculateUpdate(emoji, spatialGrid);
-      if (update) {
-        updates.push(update);
-      }
+      if (update) updates.push(update);
     });
 
     // 批量应用更新
-    requestAnimationFrame(() => {
-      updates.forEach(update => {
-        update.emoji.css({
-          left: update.x,
-          top: update.y
-        });
-        update.emoji.data({
-          x: update.x,
-          y: update.y,
-          dx: update.dx,
-          dy: update.dy
-        });
+    updates.forEach(update => {
+      update.emoji.css({
+        left: update.x,
+        top: update.y
+      }).data({
+        x: update.x,
+        y: update.y,
+        dx: update.dx,
+        dy: update.dy
       });
     });
   }
@@ -270,54 +265,65 @@ $(document).ready(function () {
     const gameAreaWidth = $("#game-area").width();
     const gameAreaHeight = $("#game-area").height();
     const padding = 2;
+    let collisionOccurred = false;
 
     // 边界检查
     if (x < padding) {
       x = padding;
       dx = Math.abs(dx);
+      collisionOccurred = true;
     }
     if (x + width > gameAreaWidth - padding) {
       x = gameAreaWidth - width - padding;
       dx = -Math.abs(dx);
+      collisionOccurred = true;
     }
     if (y < padding) {
       y = padding;
       dy = Math.abs(dy);
+      collisionOccurred = true;
     }
     if (y + height > gameAreaHeight - padding) {
       y = gameAreaHeight - height - padding;
       dy = -Math.abs(dy);
+      collisionOccurred = true;
     }
 
-    // 碰撞检测和处理
-    const type = emoji.attr("class").split(" ")[1];
+    if (!collisionOccurred) {
+      const type = emoji.attr("class").split(" ")[1];
 
-    nearbyEmojis.forEach(other => {
-      if (other[0] !== emoji[0]) {
-        const ox = other.data("x");
-        const oy = other.data("y");
-        if (Math.abs(x - ox) < width && Math.abs(y - oy) < height) {
-          const otherType = other.attr("class").split(" ")[1];
+      for (let other of nearbyEmojis) {
+        if (other[0] === emoji[0]) continue;
+
+        const ox = $(other).data("x");
+        const oy = $(other).data("y");
+        const distance = Math.sqrt(Math.pow(x - ox, 2) + Math.pow(y - oy, 2));
+
+        if (distance < width * PERFORMANCE.COLLISION_THRESHOLD) {
+          const otherType = $(other).attr("class").split(" ")[1];
 
           if (beats[type] === otherType) {
-            // 直接处理转换，不使用 setTimeout
             counters[otherType]--;
             counters[type]++;
-            other.removeClass(otherType).addClass(type).text(emojis[type]);
+            $(other).removeClass(otherType).addClass(type).text(emojis[type]);
             updateCounters();
+            break; // 每帧只处理一次转换
           } else if (beats[type] !== otherType && beats[otherType] !== type) {
-            // 简化的弹开处理
             const angle = Math.atan2(y - oy, x - ox);
-            dx = Math.cos(angle) * MAX_SPEED;
-            dy = Math.sin(angle) * MAX_SPEED;
+            dx = Math.cos(angle) * MAX_SPEED * 0.8; // 降低反弹速度
+            dy = Math.sin(angle) * MAX_SPEED * 0.8;
+            collisionOccurred = true;
+            break;
           }
         }
       }
-    });
+    }
 
-    // 更新位置
-    x += dx;
-    y += dy;
+    // 应用移动
+    if (!collisionOccurred) {
+      x += dx;
+      y += dy;
+    }
 
     return { x, y, dx, dy };
   }
@@ -326,7 +332,15 @@ $(document).ready(function () {
   const GAME_STATE = {
     running: false,
     startTime: null,
-    endTime: null
+    endTime: null,
+    animationFrame: null,  // 添加动画帧引用
+    lastUpdate: null       // 添加上次更新时间
+  };
+
+  const PERFORMANCE = {
+    UPDATE_INTERVAL: 16,    // 约60fps
+    MIN_FRAME_TIME: 14,    // 最小帧时间
+    COLLISION_THRESHOLD: 1.5 // 碰撞检测阈值
   };
 
   // 添加时间格式化函数
@@ -396,29 +410,48 @@ $(document).ready(function () {
     }
   }
 
-  // 修改 startAnimation 函数
-  function startAnimation() {
-    GAME_STATE.running = true;
-    GAME_STATE.startTime = Date.now();
-    GAME_STATE.endTime = null;
+  // 优化更新函数
+  function gameLoop(timestamp) {
+    if (!GAME_STATE.running) return;
 
-    const animationInterval = setInterval(() => {
-      if (!GAME_STATE.running) {
-        clearInterval(animationInterval);
-        return;
-      }
+    // 计算帧时间
+    if (!GAME_STATE.lastUpdate) GAME_STATE.lastUpdate = timestamp;
+    const deltaTime = timestamp - GAME_STATE.lastUpdate;
+
+    // 限制更新频率
+    if (deltaTime >= PERFORMANCE.MIN_FRAME_TIME) {
+      GAME_STATE.lastUpdate = timestamp;
       updateAllEmojis();
       updateTimer();
       checkGameEnd();
-    }, UPDATE_INTERVAL);
+    }
+
+    // 请求下一帧
+    GAME_STATE.animationFrame = requestAnimationFrame(gameLoop);
+  }
+
+  // 优化 startAnimation 函数
+  function startAnimation() {
+    if (GAME_STATE.animationFrame) {
+      cancelAnimationFrame(GAME_STATE.animationFrame);
+    }
+    GAME_STATE.running = true;
+    GAME_STATE.startTime = Date.now();
+    GAME_STATE.endTime = null;
+    GAME_STATE.lastUpdate = null;
+    GAME_STATE.animationFrame = requestAnimationFrame(gameLoop);
   }
 
   // 修改 start 按钮点击事件
   $("#start").click(function () {
+    if (GAME_STATE.animationFrame) {
+      cancelAnimationFrame(GAME_STATE.animationFrame);
+    }
     $("#game-area").empty();
     GAME_STATE.running = false;
     GAME_STATE.startTime = null;
     GAME_STATE.endTime = null;
+    GAME_STATE.lastUpdate = null;
     counters = {
       rock: 0,
       scissors: 0,
@@ -426,18 +459,15 @@ $(document).ready(function () {
     };
     updateCounters();
     $("#timer").text("时间: 00:00:000");
-    var rockCount = $("#rock").val();
-    var scissorsCount = $("#scissors").val();
-    var paperCount = $("#paper").val();
-    for (var i = 0; i < rockCount; i++) {
-      createEmoji("rock");
-    }
-    for (var i = 0; i < scissorsCount; i++) {
-      createEmoji("scissors");
-    }
-    for (var i = 0; i < paperCount; i++) {
-      createEmoji("paper");
-    }
+
+    const rockCount = parseInt($("#rock").val()) || 0;
+    const scissorsCount = parseInt($("#scissors").val()) || 0;
+    const paperCount = parseInt($("#paper").val()) || 0;
+
+    for (let i = 0; i < rockCount; i++) createEmoji("rock");
+    for (let i = 0; i < scissorsCount; i++) createEmoji("scissors");
+    for (let i = 0; i < paperCount; i++) createEmoji("paper");
+
     startAnimation();
   });
 });
