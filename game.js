@@ -1,35 +1,18 @@
 $(document).ready(function () {
   // 移动端适配
   function adjustGameArea() {
-    // 使用 document.documentElement 获取更准确的视口尺寸
-    const screenWidth = Math.min(document.documentElement.clientWidth, window.innerWidth);
-    const screenHeight = Math.min(document.documentElement.clientHeight, window.innerHeight);
     const gameArea = $("#game-area");
+    const screenWidth = document.documentElement.clientWidth || window.innerWidth;
 
-    // 计算实际可用空间
-    const inputContainer = $(".input-container").outerHeight(true);
-    const counters = $("#counters").outerHeight(true);
-    const footer = $("#footer").outerHeight(true);
-    const margins = 40; // 额外边距
-
-    // 计算游戏区域可用的实际高度
-    const availableHeight = screenHeight - inputContainer - counters - footer - margins;
-
-    // 设置游戏区域的宽度
+    // 设置宽度
     const maxWidth = Math.min(800, screenWidth - 20);
-
-    // 计算高度，保持4:3比例
-    let finalHeight = Math.min(
-      600, // 最大高度限制
-      availableHeight, // 可用高度
-      maxWidth * 0.75 // 宽高比
-    );
-
-    // 确保最小高度
-    finalHeight = Math.max(finalHeight, 300);
-
-    // 应用尺寸
     gameArea.width(maxWidth);
+
+    // 根据宽度设置高度，保持4:3比例
+    const targetHeight = Math.round(maxWidth * 0.75);
+
+    // 设置高度，但不小于300px
+    const finalHeight = Math.max(300, targetHeight);
     gameArea.height(finalHeight);
 
     // 调整 emoji 大小
@@ -39,20 +22,15 @@ $(document).ready(function () {
 
   // 修改初始化时机
   $(document).ready(function () {
-    // 确保所有元素都完全加载后再计算
-    $(window).on('load', function () {
+    // 立即调整一次
+    adjustGameArea();
+
+    // 100ms后再调整一次
+    setTimeout(adjustGameArea, 100);
+
+    // 监听窗口大小变化
+    $(window).on('resize orientationchange', function () {
       adjustGameArea();
-    });
-
-    // 添加视口变化监听
-    if ('visualViewport' in window) {
-      window.visualViewport.addEventListener('resize', adjustGameArea);
-      window.visualViewport.addEventListener('scroll', adjustGameArea);
-    }
-
-    // 保留原有的事件监听
-    $(window).on('orientationchange resize', function () {
-      setTimeout(adjustGameArea, 100);
     });
   });
 
