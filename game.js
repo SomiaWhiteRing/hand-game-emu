@@ -34,7 +34,8 @@ $(document).ready(function () {
     });
   });
 
-  var emojis = {
+  // 修改 emojis 对象为动态对象
+  let emojis = {
     rock: "🗿",
     scissors: "✂️",
     paper: "🖐️",
@@ -161,7 +162,7 @@ $(document).ready(function () {
   const GRID_SIZE = 50; // 网格大小，用于空间分区
   const UPDATE_INTERVAL = 20; // 更新间隔，略微降低更新频率
 
-  // 添加空间分区系统
+  // 添加间分区系统
   class SpatialGrid {
     constructor(width, height, cellSize) {
       this.cellSize = cellSize;
@@ -435,7 +436,7 @@ $(document).ready(function () {
     GAME_STATE.startTime = Date.now();
     GAME_STATE.endTime = null;
 
-    // 保存新的定时器 ID
+    // 保存新的时器 ID
     GAME_STATE.intervalId = setInterval(() => {
       if (GAME_STATE.running) {
         updateAllEmojis();
@@ -445,14 +446,42 @@ $(document).ready(function () {
     }, 16);
   }
 
-  // 修改 start 按钮点击事件
+  // 添加自定义警告函数
+  function showCustomAlert(message) {
+    const alert = $("<div></div>")
+      .addClass("custom-alert")
+      .text(message);
+
+    $("#alert-container").append(alert);
+
+    // 2秒后自动消失
+    setTimeout(() => {
+      alert.css("animation", "fadeOut 0.3s ease-out");
+      setTimeout(() => alert.remove(), 300);
+    }, 2000);
+  }
+
+  // 修改开始按钮点击事件
   $("#start").click(function () {
-    // 确保清除旧的定时器
-    if (GAME_STATE.intervalId !== null) {
-      clearInterval(GAME_STATE.intervalId);
-      GAME_STATE.intervalId = null;
+    // 检查所有 emoji 输入是否有效
+    const rockEmoji = $("#rock-emoji").val();
+    const scissorsEmoji = $("#scissors-emoji").val();
+    const paperEmoji = $("#paper-emoji").val();
+
+    // 检查是否所有 emoji 都已输入
+    if (!rockEmoji || !scissorsEmoji || !paperEmoji) {
+      showCustomAlert("请输入所有表情符号");
+      return;
     }
 
+    // 更新 emojis 对象
+    emojis = {
+      rock: rockEmoji,
+      scissors: scissorsEmoji,
+      paper: paperEmoji
+    };
+
+    // 清空游戏区域
     $("#game-area").empty();
     GAME_STATE.running = false;
     GAME_STATE.startTime = null;
@@ -477,6 +506,8 @@ $(document).ready(function () {
     for (let i = 0; i < scissorsCount; i++) createEmoji("scissors");
     for (let i = 0; i < paperCount; i++) createEmoji("paper");
 
+    GAME_STATE.running = true;
+    GAME_STATE.startTime = Date.now();
     startAnimation();
   });
 

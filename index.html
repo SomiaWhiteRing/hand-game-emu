@@ -46,6 +46,7 @@
 
     .input-container input[type="number"] {
       width: 60px;
+      flex: 0 0 60px;
       padding: 8px;
       border: 1px solid #ccc;
       border-radius: 3px;
@@ -75,6 +76,27 @@
       font-size: 16px;
     }
 
+    .emoji-input {
+      width: 32px;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      font-size: 16px;
+      text-align: center;
+      margin-right: 5px;
+      vertical-align: middle;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+
+    .input-container input[type="number"],
+    .emoji-input {
+      height: 20px;
+      line-height: 20px;
+      padding: 5px;
+      box-sizing: content-box;
+    }
+
     @media screen and (max-width: 600px) {
       .input-container {
         flex-direction: column;
@@ -84,7 +106,24 @@
       .input-container>div {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .emoji-input {
+        flex: 0 0 32px;
+        order: 1;
+      }
+
+      .input-container label {
+        flex: 0 0 auto;
+        order: 2;
+        margin-right: auto;
+      }
+
+      .input-container input[type="number"] {
+        flex: 0 0 60px;
+        order: 3;
+        margin-left: auto;
       }
 
       #start {
@@ -96,6 +135,45 @@
         font-size: 14px;
       }
     }
+
+    .custom-alert {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+      z-index: 1000;
+      animation: fadeIn 0.3s ease-out;
+      font-size: 16px;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translate(-50%, -60%);
+      }
+
+      to {
+        opacity: 1;
+        transform: translate(-50%, -50%);
+      }
+    }
+
+    @keyframes fadeOut {
+      from {
+        opacity: 1;
+        transform: translate(-50%, -50%);
+      }
+
+      to {
+        opacity: 0;
+        transform: translate(-50%, -40%);
+      }
+    }
   </style>
   <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
   <script src="game.js"></script>
@@ -104,14 +182,17 @@
 <body>
   <div class="input-container">
     <div>
+      <input type="text" class="emoji-input" id="rock-emoji" value="🗿" maxlength="2">
       <label for="rock">石头:</label>
       <input type="number" id="rock" value="20" />
     </div>
     <div>
+      <input type="text" class="emoji-input" id="scissors-emoji" value="✂️" maxlength="2">
       <label for="scissors">剪刀:</label>
       <input type="number" id="scissors" value="20" />
     </div>
     <div>
+      <input type="text" class="emoji-input" id="paper-emoji" value="🖐️" maxlength="2">
       <label for="paper">布:</label>
       <input type="number" id="paper" value="20" />
     </div>
@@ -129,10 +210,11 @@
     </div>
   </div>
   <div id="footer" style="text-align: center; margin-top: 20px; color: #666; font-size: 14px;">
-    石头剪刀布大战 - 苍旻白轮 © 2023~2024 - <a href="https://github.com/SomiaWhiteRing/hand-game-emu" target="_blank"
+    石头剪刀布模拟战 - 苍旻白轮 © 2023~2024 - <a href="https://github.com/SomiaWhiteRing/hand-game-emu" target="_blank"
       style="color: #666; text-decoration: none;">Github <img src="https://github.com/favicon.ico"
         style="width: 16px; height: 16px; vertical-align: middle;"></a>
   </div>
+  <div id="alert-container"></div>
 </body>
 
 </html>
