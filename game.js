@@ -1,35 +1,47 @@
 $(document).ready(function () {
   // 移动端适配
   function adjustGameArea() {
-    const screenWidth = $(window).width();
-    const screenHeight = $(window).height();
+    const screenWidth = window.innerWidth;
+    const screenHeight = window.innerHeight;
     const gameArea = $("#game-area");
 
     // 设置游戏区域的最大宽度
     const maxWidth = Math.min(800, screenWidth - 20); // 左右留10px边距
 
-    // 修改高度计算方式
-    // 保持一个合理的宽高比（4:3）
-    const height = Math.min(600, Math.max(maxWidth * 0.75, screenHeight * 0.5));
+    // 修改高度计算逻辑
+    // 考虑其他元素占用的空间（输入框、计数器、页脚等）
+    const otherElementsHeight = 200; // 预估其他元素总高度
+    const availableHeight = screenHeight - otherElementsHeight;
 
-    // 设置最小高度
-    const minHeight = 300;
-    const finalHeight = Math.max(height, minHeight);
+    // 计算合适的高度，保持4:3比例但不超过可用空间
+    let finalHeight = Math.min(
+      600, // 最大高度限制
+      availableHeight, // 可用空间限制
+      maxWidth * 0.75, // 宽高比限制
+      Math.max(300, screenHeight * 0.5) // 最小高度限制
+    );
 
+    // 确保最小高度
+    finalHeight = Math.max(finalHeight, 300);
+
+    // 应用尺寸
     gameArea.width(maxWidth);
     gameArea.height(finalHeight);
 
-    // 修改字体大小计算，将原来的除以20改为除以40
-    const fontSize = Math.max(12, maxWidth / 40); // 减小最小字体大小和整体比例
+    // 调整 emoji 大小
+    const fontSize = Math.max(12, maxWidth / 40);
     $(".emoji").css("font-size", fontSize + "px");
   }
 
-  // 确保DOM完全加载后再调用
-  adjustGameArea();
-  // 添加一个小延迟以确保正确计算
+  // 等待一小段时间确保页面完全加载
   setTimeout(adjustGameArea, 100);
 
-  // 窗口大小改变时重新调整
+  // 添加 orientationchange 事件监听
+  $(window).on('orientationchange', function () {
+    setTimeout(adjustGameArea, 100);
+  });
+
+  // 保留原有的 resize 监听
   $(window).resize(adjustGameArea);
 
   var emojis = {
