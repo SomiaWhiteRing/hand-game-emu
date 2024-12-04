@@ -1,24 +1,28 @@
 $(document).ready(function () {
   // 移动端适配
   function adjustGameArea() {
-    const screenWidth = window.innerWidth;
-    const screenHeight = window.innerHeight;
+    // 使用 document.documentElement 获取更准确的视口尺寸
+    const screenWidth = Math.min(document.documentElement.clientWidth, window.innerWidth);
+    const screenHeight = Math.min(document.documentElement.clientHeight, window.innerHeight);
     const gameArea = $("#game-area");
 
-    // 设置游戏区域的最大宽度
-    const maxWidth = Math.min(800, screenWidth - 20); // 左右留10px边距
+    // 计算实际可用空间
+    const inputContainer = $(".input-container").outerHeight(true);
+    const counters = $("#counters").outerHeight(true);
+    const footer = $("#footer").outerHeight(true);
+    const margins = 40; // 额外边距
 
-    // 修改高度计算逻辑
-    // 考虑其他元素占用的空间（输入框、计数器、页脚等）
-    const otherElementsHeight = 200; // 预估其他元素总高度
-    const availableHeight = screenHeight - otherElementsHeight;
+    // 计算游戏区域可用的实际高度
+    const availableHeight = screenHeight - inputContainer - counters - footer - margins;
 
-    // 计算合适的高度，保持4:3比例但不超过可用空间
+    // 设置游戏区域的宽度
+    const maxWidth = Math.min(800, screenWidth - 20);
+
+    // 计算高度，保持4:3比例
     let finalHeight = Math.min(
       600, // 最大高度限制
-      availableHeight, // 可用空间限制
-      maxWidth * 0.75, // 宽高比限制
-      Math.max(300, screenHeight * 0.5) // 最小高度限制
+      availableHeight, // 可用高度
+      maxWidth * 0.75 // 宽高比
     );
 
     // 确保最小高度
@@ -33,16 +37,24 @@ $(document).ready(function () {
     $(".emoji").css("font-size", fontSize + "px");
   }
 
-  // 等待一小段时间确保页面完全加载
-  setTimeout(adjustGameArea, 100);
+  // 修改初始化时机
+  $(document).ready(function () {
+    // 确保所有元素都完全加载后再计算
+    $(window).on('load', function () {
+      adjustGameArea();
+    });
 
-  // 添加 orientationchange 事件监听
-  $(window).on('orientationchange', function () {
-    setTimeout(adjustGameArea, 100);
+    // 添加视口变化监听
+    if ('visualViewport' in window) {
+      window.visualViewport.addEventListener('resize', adjustGameArea);
+      window.visualViewport.addEventListener('scroll', adjustGameArea);
+    }
+
+    // 保留原有的事件监听
+    $(window).on('orientationchange resize', function () {
+      setTimeout(adjustGameArea, 100);
+    });
   });
-
-  // 保留原有的 resize 监听
-  $(window).resize(adjustGameArea);
 
   var emojis = {
     rock: "🗿",
