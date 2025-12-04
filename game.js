@@ -127,6 +127,44 @@ $(document).ready(function () {
     $("#paper-count").text("布: " + counters["paper"]);
   }
 
+  // 统一的阵营转换函数，保证计数与 class 同步
+  function changeType(emoji, newType, options = {}) {
+    const force = options.force === true; // force 表示无视保护（例如地震石头）
+    const now = Date.now();
+
+    // 识别当前类型
+    let oldType = null;
+    if (emoji.hasClass("rock")) oldType = "rock";
+    else if (emoji.hasClass("scissors")) oldType = "scissors";
+    else if (emoji.hasClass("paper")) oldType = "paper";
+
+    if (!oldType || oldType === newType) return;
+
+    // 地震中的石头在非 force 情况下不可被变化
+    const quakeUntil = emoji.data("quakeUntil") || 0;
+    if (!force && oldType === "rock" && quakeUntil && now < quakeUntil) {
+      return;
+    }
+
+    // 被冰霜斩击锁定的单位，默认不被其他技能改阵营（除非 force）
+    const scissorLock = emoji.data("scissorLock");
+    if (!force && scissorLock) {
+      return;
+    }
+
+    // 更新计数
+    if (counters[oldType] !== undefined) counters[oldType]--;
+    if (counters[newType] !== undefined) counters[newType]++;
+
+    // 更新 class 与显示
+    emoji.removeClass("rock scissors paper").addClass(newType);
+    if (emojis[newType]) {
+      emoji.text(emojis[newType]);
+    }
+
+    updateCounters();
+  }
+
   // 在 emoji 上方显示技能文字
   function showSkillText(emoji, text) {
     const gameArea = $("#game-area");
@@ -164,6 +202,14 @@ $(document).ready(function () {
     setTimeout(() => {
       wave.remove();
     }, 550);
+  }
+
+  // 兜底：根据实际 DOM 重新统计一次三方数量，避免计数意外偏离画面
+  function recountCountersFromDom() {
+    counters.rock = $(".emoji.rock").length;
+    counters.scissors = $(".emoji.scissors").length;
+    counters.paper = $(".emoji.paper").length;
+    updateCounters();
   }
 
   // 直接修改 createEmoji 函数的定义
@@ -451,11 +497,10 @@ $(document).ready(function () {
           if (Math.abs(x - ox) < width && Math.abs(y - oy) < height) {
             if (otherEmojiType !== "rock") {
               // 被撞到的任何非石头单位统统石化
-              if (otherEmojiType === "paper") counters["paper"]--;
-              if (otherEmojiType === "scissors") counters["scissors"]--;
-              counters["rock"]++;
-              otherEmoji.removeClass("paper scissors").addClass("rock").text(emojis["rock"]);
-              updateCounters();
+              if (otherEmojiType !== "rock") {
+                // 地震石头强制将对方石化为石头
+                changeType(otherEmoji, "rock", { force: true });
+              }
             }
           }
           // 不再执行常规碰撞逻辑
@@ -465,11 +510,8 @@ $(document).ready(function () {
         const oy = other.data("y");
         if (Math.abs(x - ox) < width && Math.abs(y - oy) < height) {
           if (beats[type] === otherType) {
-            // 直接处理转换，不使用 setTimeout
-            counters[otherType]--;
-            counters[type]++;
-            other.removeClass(otherType).addClass(type).text(emojis[type]);
-            updateCounters();
+            // 直接处理转换，使用统一的 changeType 保证计数同步
+            changeType(other, type);
           } else if (beats[type] !== otherType && beats[otherType] !== type) {
             // 简化的弹开处理
             const angle = Math.atan2(y - oy, x - ox);
@@ -561,13 +603,10 @@ $(document).ready(function () {
       const currentClassType = e.attr("class").split(" ")[1];
       if (!origType || currentClassType !== origType) return;
 
-      // 计数从原类型转到剪刀
-      if (origType === "rock") counters["rock"]--;
-      if (origType === "paper") counters["paper"]--;
-      counters["scissors"]++;
-
-      e.removeClass(origType).addClass("scissors");
-      updateCounters();
+      // 计数从原类型转到剪刀（只在仍是原阵营时生效）
+      if (origType === currentClassType) {
+        changeType(e, "scissors");
+      }
     }, SKILL_SCISSOR.LOCK_DURATION);
   }
 
@@ -642,10 +681,7 @@ $(document).ready(function () {
         e.data("dx", ndx);
         e.data("dy", ndy);
 
-        if (targetType === "paper") counters["paper"]--;
-        if (targetType === "scissors") counters["scissors"]--;
-        counters["rock"]++;
-        e.removeClass("paper scissors").addClass("rock").text(emojis["rock"]);
+        changeType(e, "rock", { force: true });
         e.addClass("skill-hit");
         setTimeout(() => e.removeClass("skill-hit"), 380);
         affected++;
@@ -829,6 +865,9 @@ $(document).ready(function () {
 
   // 添加游戏结束检查函数
   function checkGameEnd() {
+    // 先用当前画面兜底同步一次计数，避免长期偏差
+    recountCountersFromDom();
+
     let winner = null;
     let totalCount = 0;
 
