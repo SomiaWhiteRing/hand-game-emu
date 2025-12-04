@@ -59,6 +59,37 @@ $(document).ready(function () {
     paper: "scissors"
   };
 
+  // 技能相关配置
+  const SKILL_CONFIG = {
+    CHECK_INTERVAL: 900,    // 每隔多久检查一次是否触发技能（毫秒）
+    TRIGGER_CHANCE: 0.28,   // 每次检查触发技能的概率
+    EFFECT_RADIUS: 180,     // 默认技能影响半径（用于地震/召唤）
+    MAX_TARGETS: 10         // 单次技能最多作用的目标数
+  };
+
+  // 各技能可调参数（方便平衡用）
+  const SKILL_ROCK = {
+    DURATION: 5000,         // 地震持续时间（毫秒）
+    PUSH_FORCE: 2.2         // 地震初次冲击的弹飞力度
+  };
+
+  const SKILL_SCISSOR = {
+    RADIUS: 60,             // 冰霜斩击判定半径
+    DURATION: 1500,         // 冰霜斩击持续时间（毫秒）
+    LOCK_DURATION: 2000,    // 被锁定单位的冻结时间
+    LOCK_MID_TIME: 1000     // 渐变中点（用于切换表情）
+  };
+
+  const SKILL_PAPER = {
+    BASE_SPAWN: 8,          // 召唤结界默认召唤数量上限
+    SUMMON_INTERVAL: 400,   // 每个召唤之间的时间间隔（毫秒）
+    RELEASE_DELAY: 200      // 所有召唤完成后，恢复碰撞的额外延迟
+  };
+
+  let lastSkillCheckTime = 0;
+  let summonIdCounter = 0;
+  let scissorZones = [];
+
   const CHASE_FORCE = 0.1;  // 追逐力度
   const FLEE_FORCE = 0.11;   // 逃避力度
   const DETECTION_RADIUS = 100;  // 检测半径
@@ -76,6 +107,45 @@ $(document).ready(function () {
     $("#rock-count").text("石头: " + counters["rock"]);
     $("#scissors-count").text("剪刀: " + counters["scissors"]);
     $("#paper-count").text("布: " + counters["paper"]);
+  }
+
+  // 在 emoji 上方显示技能文字
+  function showSkillText(emoji, text) {
+    const gameArea = $("#game-area");
+    const offset = emoji.position();
+    const textEl = $("<div></div>")
+      .addClass("skill-text")
+      .text(text)
+      .css({
+        left: offset.left + emoji.outerWidth() / 2,
+        top: offset.top
+      });
+
+    gameArea.append(textEl);
+
+    setTimeout(() => {
+      textEl.remove();
+    }, 900);
+  }
+
+  // 在施法者位置画一个简单的“冲击波”圆圈
+  function showSkillWave(emoji, radius) {
+    const gameArea = $("#game-area");
+    const offset = emoji.position();
+    const wave = $("<div></div>")
+      .addClass("skill-wave")
+      .css({
+        left: offset.left + emoji.outerWidth() / 2,
+        top: offset.top + emoji.outerHeight() / 2,
+        width: radius * 2,
+        height: radius * 2
+      });
+
+    gameArea.append(wave);
+
+    setTimeout(() => {
+      wave.remove();
+    }, 550);
   }
 
   // 直接修改 createEmoji 函数的定义
@@ -126,6 +196,11 @@ $(document).ready(function () {
       totalForceY += (Math.random() - 0.5) * RANDOM.MAX_WANDER;
     }
 
+    // 地震中的石头：不再参与追逐 / 逃跑逻辑，只保留轻微随机游走
+    const quakeUntil = emoji.data("quakeUntil") || 0;
+    const now = Date.now();
+    const ignoreRPS = type === "rock" && quakeUntil && now < quakeUntil;
+
     allEmojis.each(function () {
       let other = $(this);
       if (other[0] !== emoji[0]) {
@@ -143,13 +218,15 @@ $(document).ready(function () {
           const chaseVariation = 1 + (Math.random() - 0.5) * RANDOM.FORCE_VARIATION;
           const fleeVariation = 1 + (Math.random() - 0.5) * RANDOM.FORCE_VARIATION;
 
-          if (beats[type] === otherType) {
-            totalForceX += normalizedDirX * CHASE_FORCE * chaseVariation;
-            totalForceY += normalizedDirY * CHASE_FORCE * chaseVariation;
-          }
-          if (beatenBy[type] === otherType) {
-            totalForceX -= normalizedDirX * FLEE_FORCE * fleeVariation;
-            totalForceY -= normalizedDirY * FLEE_FORCE * fleeVariation;
+          if (!ignoreRPS) {
+            if (beats[type] === otherType) {
+              totalForceX += normalizedDirX * CHASE_FORCE * chaseVariation;
+              totalForceY += normalizedDirY * CHASE_FORCE * chaseVariation;
+            }
+            if (beatenBy[type] === otherType) {
+              totalForceX -= normalizedDirX * FLEE_FORCE * fleeVariation;
+              totalForceY -= normalizedDirY * FLEE_FORCE * fleeVariation;
+            }
           }
         }
       }
@@ -244,34 +321,53 @@ $(document).ready(function () {
 
   // 修改 calculateUpdate 函数
   function calculateUpdate(emoji, spatialGrid) {
+    const now = Date.now();
+
+    // 统一读取技能冻结 / 碰撞状态
+    const freezeUntil = emoji.data("freezeUntil") || 0;
+    const noCollision = !!emoji.data("noCollision");
+    const quakeUntil = emoji.data("quakeUntil") || 0;
+
     let x = emoji.data("x");
     let y = emoji.data("y");
     let dx = emoji.data("dx");
     let dy = emoji.data("dy");
 
+    // 在任何行为运算前，先检查是否踏入了冰霜斩击的范围
+    if (!emoji.data("scissorLock")) {
+      checkScissorZones(emoji, now);
+    }
+
     // 使用保存的速度倍率
     const speedScale = GAME_STATE.currentSpeedScale;
 
-    // 添加随机速度变化
-    dx *= (1 + (Math.random() - 0.5) * RANDOM.SPEED_VARIATION);
-    dy *= (1 + (Math.random() - 0.5) * RANDOM.SPEED_VARIATION);
+    let result;
 
-    const nearbyEmojis = spatialGrid.getNearbyEmojis(x, y);
-    const behavior = calculateBehavior(emoji, $(nearbyEmojis));
+    // 若处于技能冻结阶段：位置保持不动、不参与碰撞，只保留自身轻微视觉抖动（如果有）
+    if (freezeUntil && now < freezeUntil) {
+      result = { x, y, dx: 0, dy: 0 };
+    } else {
+      // 添加随机速度变化
+      dx *= (1 + (Math.random() - 0.5) * RANDOM.SPEED_VARIATION);
+      dy *= (1 + (Math.random() - 0.5) * RANDOM.SPEED_VARIATION);
 
-    // 应用缩放到行为力
-    dx += behavior.forceX * speedScale;
-    dy += behavior.forceY * speedScale;
+      const nearbyEmojis = spatialGrid.getNearbyEmojis(x, y);
+      const behavior = calculateBehavior(emoji, $(nearbyEmojis));
 
-    // 应用缩放到最大速度限制
-    const scaledMaxSpeed = MAX_SPEED * speedScale;
-    const speed = Math.sqrt(dx * dx + dy * dy);
-    if (speed > scaledMaxSpeed) {
-      dx = (dx / speed) * scaledMaxSpeed;
-      dy = (dy / speed) * scaledMaxSpeed;
+      // 应用缩放到行为力
+      dx += behavior.forceX * speedScale;
+      dy += behavior.forceY * speedScale;
+
+      // 应用缩放到最大速度限制
+      const scaledMaxSpeed = MAX_SPEED * speedScale;
+      const speed = Math.sqrt(dx * dx + dy * dy);
+      if (speed > scaledMaxSpeed) {
+        dx = (dx / speed) * scaledMaxSpeed;
+        dy = (dy / speed) * scaledMaxSpeed;
+      }
+
+      result = handleCollisions(emoji, x, y, dx, dy, spatialGrid.getNearbyEmojis(x, y), speedScale, noCollision, quakeUntil, now);
     }
-
-    const result = handleCollisions(emoji, x, y, dx, dy, nearbyEmojis, speedScale);
 
     return {
       emoji: emoji,
@@ -283,7 +379,7 @@ $(document).ready(function () {
   }
 
   // 新增碰撞处理函数
-  function handleCollisions(emoji, x, y, dx, dy, nearbyEmojis, speedScale) {
+  function handleCollisions(emoji, x, y, dx, dy, nearbyEmojis, speedScale, noCollision, quakeUntil, now) {
     const width = emoji.width();
     const height = emoji.height();
     const gameAreaWidth = $("#game-area").width();
@@ -313,11 +409,43 @@ $(document).ready(function () {
 
     nearbyEmojis.forEach(other => {
       if (other[0] !== emoji[0]) {
+        const otherType = other.attr("class").split(" ")[1];
+
+        // 任何一方处于“无碰撞”状态时忽略碰撞
+        if (noCollision || other.data("noCollision")) return;
+
+        // 任意一方是处于地震状态的石头，启用地震专属规则
+        const thisIsQuakingRock = (type === "rock") && quakeUntil && now < quakeUntil;
+        const otherQuakeUntil = other.data("quakeUntil") || 0;
+        const otherIsQuakingRock = (otherType === "rock") && otherQuakeUntil && now < otherQuakeUntil;
+
+        if (thisIsQuakingRock || otherIsQuakingRock) {
+          const rockEmoji = thisIsQuakingRock ? emoji : other;
+          const otherEmoji = thisIsQuakingRock ? other : emoji;
+          const otherEmojiType = otherEmoji.attr("class").split(" ")[1];
+
+          const rx = rockEmoji.data("x");
+          const ry = rockEmoji.data("y");
+          const ox = otherEmoji.data("x");
+          const oy = otherEmoji.data("y");
+
+          // 地震石头不会被任何单位弹走，只影响对方
+          if (Math.abs(x - ox) < width && Math.abs(y - oy) < height) {
+            if (otherEmojiType !== "rock") {
+              // 被撞到的任何非石头单位统统石化
+              if (otherEmojiType === "paper") counters["paper"]--;
+              if (otherEmojiType === "scissors") counters["scissors"]--;
+              counters["rock"]++;
+              otherEmoji.removeClass("paper scissors").addClass("rock").text(emojis["rock"]);
+              updateCounters();
+            }
+          }
+          // 不再执行常规碰撞逻辑
+          return;
+        }
         const ox = other.data("x");
         const oy = other.data("y");
         if (Math.abs(x - ox) < width && Math.abs(y - oy) < height) {
-          const otherType = other.attr("class").split(" ")[1];
-
           if (beats[type] === otherType) {
             // 直接处理转换，不使用 setTimeout
             counters[otherType]--;
@@ -339,6 +467,314 @@ $(document).ready(function () {
     y += dy;
 
     return { x, y, dx, dy };
+  }
+
+  // 检查是否踏入了任何冰霜斩击范围
+  function checkScissorZones(emoji, now) {
+    if (scissorZones.length === 0) return;
+    if (emoji.data("scissorLock")) return;
+
+    const type = emoji.attr("class").split(" ")[1];
+    if (type === "scissors") return; // 已经是剪刀的不变
+
+    // 地震中的石头不受冰霜斩击影响
+    const quakeUntil = emoji.data("quakeUntil") || 0;
+    if (type === "rock" && quakeUntil && now < quakeUntil) return;
+
+    const ex = emoji.data("x");
+    const ey = emoji.data("y");
+
+    for (let i = 0; i < scissorZones.length; i++) {
+      const zone = scissorZones[i];
+      if (now > zone.endTime) continue;
+    const dx = ex - zone.cx;
+    const dy = ey - zone.cy;
+    if (dx * dx + dy * dy <= zone.radius * zone.radius) {
+      applyScissorLock(emoji, now);
+      break;
+      }
+    }
+  }
+
+  // 将任意单位锁定在冰霜斩击范围内并在结束时变成剪刀
+  function applyScissorLock(e, now) {
+    if (e.data("scissorLock")) return;
+
+    const currentType = e.attr("class").split(" ")[1];
+    if (!currentType) return;
+    if (currentType === "scissors") return;
+
+    // 地震中的石头不受冰霜斩击影响
+    const quakeUntil = e.data("quakeUntil") || 0;
+    if (currentType === "rock" && quakeUntil && now < quakeUntil) return;
+
+    const targetFreeze = now + SKILL_SCISSOR.LOCK_DURATION;
+    const existFreeze = e.data("freezeUntil") || 0;
+
+    e.data("freezeUntil", Math.max(targetFreeze, existFreeze));
+    e.data("noCollision", true);
+    e.data("scissorLock", true);
+    e.data("scissorOriginalType", currentType);
+    e.addClass("morph-lock");
+
+    // 中点时在完全透明状态下换成剪刀表情
+    setTimeout(() => {
+      if (!e.closest("body").length) return;
+      if (!e.data("scissorLock")) return;
+      e.text(emojis["scissors"]);
+    }, SKILL_SCISSOR.LOCK_MID_TIME);
+
+    // 结束时恢复碰撞与移动，并真正完成类型转换
+    setTimeout(() => {
+      if (!e.closest("body").length) return;
+
+      const origType = e.data("scissorOriginalType");
+      e.removeClass("morph-lock");
+      e.data("scissorLock", false);
+      e.data("scissorOriginalType", null);
+
+      // 如果没有其他技能再延长冻结，则解除冻结与无碰撞状态
+      const freezeUntil = e.data("freezeUntil") || 0;
+      if (freezeUntil <= Date.now()) {
+        e.data("freezeUntil", 0);
+        e.data("noCollision", false);
+      }
+
+      const currentClassType = e.attr("class").split(" ")[1];
+      if (!origType || currentClassType !== origType) return;
+
+      // 计数从原类型转到剪刀
+      if (origType === "rock") counters["rock"]--;
+      if (origType === "paper") counters["paper"]--;
+      counters["scissors"]++;
+
+      e.removeClass(origType).addClass("scissors");
+      updateCounters();
+    }, SKILL_SCISSOR.LOCK_DURATION);
+  }
+
+  // 技能效果：根据类型发动不同的“群体技”
+  function triggerSkillNow(caster) {
+    if (!caster || caster.length === 0) return;
+
+    const casterType = caster.attr("class").split(" ")[1];
+    const cx = caster.data("x");
+    const cy = caster.data("y");
+
+    const all = $(".emoji");
+    const candidates = [];
+
+    all.each(function () {
+      const e = $(this);
+      if (e[0] === caster[0]) return;
+      const ex = e.data("x");
+      const ey = e.data("y");
+      const d = calculateDistance(cx, cy, ex, ey).distance;
+      if (d <= SKILL_CONFIG.EFFECT_RADIUS) {
+        candidates.push({ e, d });
+      }
+    });
+
+    // 按距离从近到远排序，优先作用附近单位
+    candidates.sort((a, b) => a.d - b.d);
+
+    let affected = 0;
+
+    // 通用：给施法者加一圈冲击波、放大效果，同时让战场轻微抖动
+    caster.addClass("skill-caster");
+    showSkillWave(caster, SKILL_CONFIG.EFFECT_RADIUS);
+    setTimeout(() => caster.removeClass("skill-caster"), 450);
+
+    const gameArea = $("#game-area");
+    gameArea.addClass("skill-shake");
+    setTimeout(() => gameArea.removeClass("skill-shake"), 280);
+
+    // 石头：地震 - 缠绕光圈一段时间，光圈与碰撞中的一切非石头单位都会被石化
+    if (casterType === "rock") {
+      showSkillText(caster, "地震！");
+
+      // 在石头周围挂一个旋转光圈
+      const orbit = $("<div></div>").addClass("rock-orbit-ring");
+      caster.append(orbit);
+      setTimeout(() => orbit.remove(), 2000);
+
+      // 在一定时间内标记为“地震状态”的石头
+      const now = Date.now();
+      caster.data("quakeUntil", now + SKILL_ROCK.DURATION);
+
+      // 初次发动时，对范围内所有非石头单位立即产生一次石化冲击
+      candidates.forEach(({ e, d }) => {
+        if (affected >= SKILL_CONFIG.MAX_TARGETS) return;
+        const targetType = e.attr("class").split(" ")[1];
+        if (targetType === "rock") return;
+
+        const ex = e.data("x");
+        const ey = e.data("y");
+        const dir = calculateDistance(cx, cy, ex, ey);
+        if (dir.distance === 0) return;
+        const push = SKILL_ROCK.PUSH_FORCE;
+        const ndx = (ex - cx) / dir.distance * push * GAME_STATE.currentSpeedScale;
+        const ndy = (ey - cy) / dir.distance * push * GAME_STATE.currentSpeedScale;
+
+        e.data("dx", ndx);
+        e.data("dy", ndy);
+
+        if (targetType === "paper") counters["paper"]--;
+        if (targetType === "scissors") counters["scissors"]--;
+        counters["rock"]++;
+        e.removeClass("paper scissors").addClass("rock").text(emojis["rock"]);
+        e.addClass("skill-hit");
+        setTimeout(() => e.removeClass("skill-hit"), 380);
+        affected++;
+      });
+      if (affected > 0) {
+        updateCounters();
+      }
+      return;
+    }
+
+    // 剪刀：冰霜斩击 - 固定范围的圆形高亮区域，圆内踏入的单位会被锁定并渐变为剪刀
+    if (casterType === "scissors") {
+      showSkillText(caster, "冰霜斩击！");
+
+      // 使用常量定义的判定半径和持续时间
+      const SCISSOR_RADIUS = SKILL_SCISSOR.RADIUS;
+      const areaHighlight = $("<div></div>").addClass("scissor-area");
+      const offset = caster.position();
+      areaHighlight.css({
+        left: offset.left + caster.outerWidth() / 2,
+        top: offset.top + caster.outerHeight() / 2,
+        width: SCISSOR_RADIUS * 2,
+        height: SCISSOR_RADIUS * 2
+      });
+      $("#game-area").append(areaHighlight);
+      setTimeout(() => areaHighlight.remove(), SKILL_SCISSOR.DURATION);
+      
+      // 记录一个持续一段时间的判定区域，计算更新时会自动把踏入该区域的单位锁定
+      const zoneNow = Date.now();
+      const zone = {
+        cx,
+        cy,
+        radius: SCISSOR_RADIUS,
+        endTime: zoneNow + SKILL_SCISSOR.DURATION
+      };
+      scissorZones.push(zone);
+      return;
+    }
+
+    // 布：召唤结界 - 布反色并暂时脱离碰撞，按顺序从本体飞出新的布
+    if (casterType === "paper") {
+      showSkillText(caster, "召唤结界！");
+      const spawnCount = Math.min(SKILL_PAPER.BASE_SPAWN, SKILL_CONFIG.MAX_TARGETS);
+      const groupId = ++summonIdCounter;
+      const summoned = [];
+
+      // 施法者自身反色并暂时脱离碰撞
+      caster.addClass("paper-summon");
+      caster.data("noCollision", true);
+
+      const baseAngle = Math.random() * Math.PI * 2;
+
+      for (let i = 0; i < spawnCount; i++) {
+        ((index) => {
+          setTimeout(() => {
+            if (!caster.closest("body").length) return;
+            const spawned = createEmoji("paper");
+            spawned.addClass("paper-summon");
+            spawned.data("noCollision", true);
+            spawned.data("summonGroup", groupId);
+            summoned.push(spawned);
+
+            // 初始位置在施法者正中心
+            const startX = cx;
+            const startY = cy;
+            spawned.css({ left: startX, top: startY });
+            spawned.data("x", startX);
+            spawned.data("y", startY);
+
+            // 让召唤出来的布从本体飞出：沿不同方向抛射
+            const angle = baseAngle + (index * (Math.PI * 2 / spawnCount));
+            const speed = 1.6 * GAME_STATE.currentSpeedScale;
+            spawned.data("dx", Math.cos(angle) * speed);
+            spawned.data("dy", Math.sin(angle) * speed);
+          }, index * SKILL_PAPER.SUMMON_INTERVAL);
+        })(i);
+      }
+
+      // 所有召唤完成后，恢复碰撞与正常行为
+      setTimeout(() => {
+        if (caster.closest("body").length) {
+          caster.removeClass("paper-summon");
+          caster.data("noCollision", false);
+        }
+        summoned.forEach(s => {
+          if (!s.closest("body").length) return;
+          s.removeClass("paper-summon");
+          s.data("noCollision", false);
+        });
+      }, spawnCount * SKILL_PAPER.SUMMON_INTERVAL + SKILL_PAPER.RELEASE_DELAY);
+    }
+  }
+
+  // 每一帧按时间节奏尝试触发一次技能
+  function maybeTriggerRandomSkill() {
+    const now = Date.now();
+    if (now - lastSkillCheckTime < SKILL_CONFIG.CHECK_INTERVAL) {
+      return;
+    }
+    lastSkillCheckTime = now;
+
+    if (Math.random() > SKILL_CONFIG.TRIGGER_CHANCE) {
+      return;
+    }
+
+    const all = $(".emoji");
+    if (all.length === 0) return;
+
+    // 统计当前存活数量，并找出数量最少的阵营
+    const liveCounts = {
+      rock: counters.rock || 0,
+      scissors: counters.scissors || 0,
+      paper: counters.paper || 0
+    };
+
+    let minCount = Infinity;
+    const candidateTypes = [];
+    Object.keys(liveCounts).forEach(type => {
+      const count = liveCounts[type];
+      if (count > 0) {
+        if (count < minCount) {
+          minCount = count;
+          candidateTypes.length = 0;
+          candidateTypes.push(type);
+        } else if (count === minCount) {
+          candidateTypes.push(type);
+        }
+      }
+    });
+
+    // 如果所有类型计数都为 0（理论上不会发生），退回到完全随机
+    if (candidateTypes.length === 0) {
+      const index = Math.floor(Math.random() * all.length);
+      triggerSkillNow($(all.get(index)));
+      return;
+    }
+
+    // 在数量最少的阵营中选一个具体单位作为施法者
+    const preferredType = candidateTypes[Math.floor(Math.random() * candidateTypes.length)];
+    const preferredEmojis = all.filter(`.${preferredType}`);
+
+    if (preferredEmojis.length > 0) {
+      const idx = Math.floor(Math.random() * preferredEmojis.length);
+      const caster = $(preferredEmojis.get(idx));
+      triggerSkillNow(caster);
+      return;
+    }
+
+    // 兜底：如果因为某种原因没找到匹配，仍然从全部单位中随机挑一个
+    const fallbackIndex = Math.floor(Math.random() * all.length);
+    const caster = $(all.get(fallbackIndex));
+    triggerSkillNow(caster);
   }
 
   // 在开头的常量定义部分添加
@@ -442,6 +878,7 @@ $(document).ready(function () {
         updateAllEmojis();
         updateTimer();
         checkGameEnd();
+        maybeTriggerRandomSkill();
       }
     }, 16);
   }
