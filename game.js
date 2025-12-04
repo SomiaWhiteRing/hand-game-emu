@@ -70,7 +70,7 @@ $(document).ready(function () {
   const SKILL_ROCK = {
     DURATION: 5000,         // 地震持续时间（毫秒）
     PUSH_FORCE: 2.2,        // 地震初次冲击的弹飞力度
-    RADIUS_RATIO: 0.30      // 地震技能范围相对于对战窗口较短边的比例
+    RADIUS_RATIO: 0.20      // 地震技能范围相对于对战窗口较短边的比例
   };
 
   const SKILL_SCISSOR = {
