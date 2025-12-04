@@ -63,27 +63,27 @@ $(document).ready(function () {
   const SKILL_CONFIG = {
     CHECK_INTERVAL: 900,    // 每隔多久检查一次是否触发技能（毫秒）
     TRIGGER_CHANCE: 0.28,   // 每次检查触发技能的概率
-    EFFECT_RADIUS: 180,     // 默认技能影响半径（用于地震/召唤）
     MAX_TARGETS: 10         // 单次技能最多作用的目标数
   };
 
   // 各技能可调参数（方便平衡用）
   const SKILL_ROCK = {
     DURATION: 5000,         // 地震持续时间（毫秒）
-    PUSH_FORCE: 2.2         // 地震初次冲击的弹飞力度
+    PUSH_FORCE: 2.2,        // 地震初次冲击的弹飞力度
+    RADIUS_RATIO: 0.30      // 地震技能范围相对于对战窗口较短边的比例
   };
 
   const SKILL_SCISSOR = {
-    RADIUS: 60,             // 冰霜斩击判定半径
+    RADIUS_RATIO: 0.20,     // 冰霜斩击判定半径占较短边的比例
     DURATION: 1500,         // 冰霜斩击持续时间（毫秒）
-    LOCK_DURATION: 2000,    // 被锁定单位的冻结时间
-    LOCK_MID_TIME: 1000     // 渐变中点（用于切换表情）
+    LOCK_DURATION: 1000,    // 被锁定单位的冻结时间
+    LOCK_MID_TIME: 500     // 渐变中点（用于切换表情）
   };
 
   const SKILL_PAPER = {
     BASE_SPAWN: 8,          // 召唤结界默认召唤数量上限
-    SUMMON_INTERVAL: 400,   // 每个召唤之间的时间间隔（毫秒）
-    RELEASE_DELAY: 200      // 所有召唤完成后，恢复碰撞的额外延迟
+    SUMMON_INTERVAL: 100,   // 每个召唤之间的时间间隔（毫秒）
+    RELEASE_DELAY: 100      // 所有召唤完成后，恢复碰撞的额外延迟
   };
 
   let lastSkillCheckTime = 0;
@@ -101,6 +101,24 @@ $(document).ready(function () {
       directionX: (x2 - x1),
       directionY: (y2 - y1)
     };
+  }
+
+  // 基于对战窗口尺寸计算一个基础长度（较短边）
+  function getBattleShortSide() {
+    const gameArea = $("#game-area");
+    const w = gameArea.width();
+    const h = gameArea.height();
+    return Math.max(1, Math.min(w, h));
+  }
+
+  // 计算地震等大范围技能的半径
+  function getRockEffectRadius() {
+    return getBattleShortSide() * SKILL_ROCK.RADIUS_RATIO;
+  }
+
+  // 计算冰霜斩击的判定半径
+  function getScissorRadius() {
+    return getBattleShortSide() * SKILL_SCISSOR.RADIUS_RATIO;
   }
 
   function updateCounters() {
@@ -561,6 +579,11 @@ $(document).ready(function () {
     const cx = caster.data("x");
     const cy = caster.data("y");
 
+    // 按技能类型动态计算技能范围（与对战窗口尺寸成比例）
+    const effectRadius = (casterType === "scissors")
+      ? getScissorRadius()
+      : getRockEffectRadius();
+
     const all = $(".emoji");
     const candidates = [];
 
@@ -570,7 +593,7 @@ $(document).ready(function () {
       const ex = e.data("x");
       const ey = e.data("y");
       const d = calculateDistance(cx, cy, ex, ey).distance;
-      if (d <= SKILL_CONFIG.EFFECT_RADIUS) {
+      if (d <= effectRadius) {
         candidates.push({ e, d });
       }
     });
@@ -582,7 +605,7 @@ $(document).ready(function () {
 
     // 通用：给施法者加一圈冲击波、放大效果，同时让战场轻微抖动
     caster.addClass("skill-caster");
-    showSkillWave(caster, SKILL_CONFIG.EFFECT_RADIUS);
+    showSkillWave(caster, effectRadius);
     setTimeout(() => caster.removeClass("skill-caster"), 450);
 
     const gameArea = $("#game-area");
@@ -634,11 +657,11 @@ $(document).ready(function () {
     }
 
     // 剪刀：冰霜斩击 - 固定范围的圆形高亮区域，圆内踏入的单位会被锁定并渐变为剪刀
-    if (casterType === "scissors") {
-      showSkillText(caster, "冰霜斩击！");
+      if (casterType === "scissors") {
+        showSkillText(caster, "冰霜斩击！");
 
-      // 使用常量定义的判定半径和持续时间
-      const SCISSOR_RADIUS = SKILL_SCISSOR.RADIUS;
+        // 使用与窗口尺寸成比例的判定半径和持续时间
+        const SCISSOR_RADIUS = getScissorRadius();
       const areaHighlight = $("<div></div>").addClass("scissor-area");
       const offset = caster.position();
       areaHighlight.css({
